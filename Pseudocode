@@ -1,0 +1,76 @@
+function parallel_bucket_sort(data, N, num_processes):
+    Initialize MPI
+    rank = get_process_rank()
+    size = get_number_of_processes()
+
+    if rank == 0:
+        //generating random data and ceares a sorted copy using serial sort for later verification.
+        data = generate_random_data(N)
+        sorted_serial = copy(data)
+        
+        // Start timing for serial sort
+        serial_start_time = get_current_time()
+        sorted_serial = serial_sort(sorted_serial)
+        serial_end_time = get_current_time()
+        serial_time = serial_end_time - serial_start_time
+        print("Serial sort completed in", serial_time)
+
+    MPI_Barrier() //Ensuring all processes are synchronized
+
+    // Start timing for parallel sort
+    parallel_start_time = get_current_time()
+
+    MPI_Bcast(N, root=0)  //brodcasting the size of N from the root process with rank 0 to all other processes
+    chunk_size = N / size
+    local_data = allocate_memory(chunk_size)
+
+    //here we are distributing chunks of the original data to each process to its own local_data array then sorting it
+    MPI_Scatter(data, chunk_size, local_data, root=0)
+    sort(local_data)
+
+
+    //creating arrays for counts and displacements in order to see and track how many elements each process will send / receive
+    sendcounts = allocate_array(size, initialized to 0)
+    sdispls = allocate_array(size, initialized to 0)
+    recvcounts = allocate_array(size, initialized to 0)
+    rdispls = allocate_array(size, initialized to 0)
+
+    
+    buckets = allocate_array_of_arrays(size)
+
+
+    //the loop iterates in local_data and places each element into the appropriate bucket, if the number is bigger than the size it is given to maximum/last bucket
+    for i = 0 to chunk_size - 1:
+        target_proc = (local_data[i] / max_value) * size
+        if target_proc >= size:
+            target_proc = size - 1
+        buckets[target_proc][sendcounts[target_proc]++] = local_data[i]
+
+
+
+    // initializing all to all exchange between processes, so here we are allowing each process to send its buckets of data to all other processes and each process sorts the bucket of data he has received
+    MPI_Alltoall(sendbuf, sendcounts, sdispls, recvbuf, recvcounts, rdispls)
+    sort(recvbuf)
+
+    total_recv = gather_counts(recvcounts)
+    rdispls = compute_displacements(recvcounts)
+
+    if rank == 0:
+        final_sorted_data = allocate_memory(N)
+
+    MPI_Gatherv(recvbuf, total_recv, final_sorted_data, recvcounts, rdispls, root=0)
+
+    // End timing for parallel sort
+    parallel_end_time = get_current_time()
+    parallel_time = parallel_end_time - parallel_start_time
+
+
+    // when the root process is done , it compares the final sorted data with the serial sorted for corectness and calculates the speedup
+    if rank == 0:
+        verify_sorted_data(sorted_serial, final_sorted_data)
+        print("Parallel sort completed in", parallel_time)
+        speedup = serial_time / parallel_time
+        print("Speedup:", speedup)
+    
+    Free allocated memory
+    Finalize MPI
